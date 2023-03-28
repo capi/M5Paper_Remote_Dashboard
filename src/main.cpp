@@ -16,12 +16,26 @@ M5EPD_Canvas imageCanvas(&M5.EPD);
 char timeStrbuff[64];
 char batteryStrbuff[64];
 
-void flushTime() {
-    rtc_time_t rtcTime;
-    rtc_date_t rtcDate;
-    M5.RTC.getTime(&rtcTime);
+void readRtc(rtc_date_t& rtcDate, rtc_time_t& rtcTime) {
     M5.RTC.getDate(&rtcDate);
+    M5.RTC.getTime(&rtcTime);
+}
 
+void readBattery(uint32_t& batteryVoltage, uint32_t& batteryPercentage) {
+    batteryVoltage = M5.getBatteryVoltage();
+    float fBatteryPercent = (float)(batteryVoltage - 3300) / (float)(4350 - 3300);
+    if (fBatteryPercent <= 0.01) {
+        fBatteryPercent = 0.01;
+    }
+    if (fBatteryPercent > 1) {
+        fBatteryPercent = 1;
+    }
+    batteryPercentage = (uint32_t)(fBatteryPercent * 100);
+}
+
+void flushTime() {
+    rtc_date_t rtcDate; rtc_time_t rtcTime;
+    readRtc(rtcDate, rtcTime);
     //sprintf(timeStrbuff, "%d/%02d/%02d %02d:%02d:%02d", rtcDate.year,
     //        rtcDate.mon, rtcDate.day, rtcTime.hour, rtcTime.min, rtcTime.sec);
     sprintf(timeStrbuff, "%02d/%02d %02d:%02d:%02d",
@@ -35,28 +49,22 @@ void flushTime() {
 }
 
 void flushBattery() {
-    uint32_t batteryVoltage = M5.getBatteryVoltage();
-    float batteryPercent = (float)(batteryVoltage - 3300) / (float)(4350 - 3300);
-    if (batteryPercent <= 0.01) {
-        batteryPercent = 0.01;
-    }
-    if (batteryPercent > 1) {
-        batteryPercent = 1;
-    }
-
+    uint32_t batteryVoltage, batteryPercentage;
+    readBattery(batteryVoltage, batteryPercentage);
     // trailing spaces to overwrite any previous artifacts of 1% < 10% < 100%
-    sprintf(batteryStrbuff, "%dmV (%d%%)  ", batteryVoltage, (int)(batteryPercent * 100));
+    sprintf(batteryStrbuff, "%dmV (%d%%)  ", batteryVoltage, batteryPercentage);
     batteryCanvas.drawString(batteryStrbuff, 0, 0);
     batteryCanvas.pushCanvas(10, MY_SCREEN_HEIGHT - batteryCanvas.height() - 10, UPDATE_MODE_DU4);
 }
 
 void setupTime() {
-    rtc_date_t rtcDate;
-    rtc_time_t rtcTime;
-    M5.RTC.getDate(&rtcDate);
-    M5.RTC.getTime(&rtcTime);
-
+    if (WiFi.status() != WL_CONNECTED) {
+        return;
+    }
+    rtc_date_t rtcDate; rtc_time_t rtcTime;
+    readRtc(rtcDate, rtcTime);
     bool syncRequired = false;
+
     if (rtcDate.year < 2022) {
         ESP_LOGI("setupTime", "RTC Year is < 2022, requiring sync.");
         syncRequired = true;
@@ -69,7 +77,6 @@ void setupTime() {
         ESP_LOGI("setupTime", "RTC seems to have been properly initialized, skipping NTP check.");
         return;
     }
-
 
     ESP_LOGI("setupTime", "Calling configTime(), waiting 5 seconds for response...");
     configTime(0, 0, "time1.google.com", "time2.google.com");
@@ -90,6 +97,30 @@ void setupTime() {
     M5.RTC.setDate(&rtcDate);
 }
 
+String buildUrl() {
+    rtc_date_t rtcDate; rtc_time_t  rtcTime;
+    readRtc(rtcDate, rtcTime);
+    uint32_t batteryVoltage, batteryPercentage;
+    readBattery(batteryVoltage, batteryPercentage);
+
+    String strVoltage, strBatteryPercent;
+    strVoltage.concat(batteryVoltage);
+    strBatteryPercent.concat(batteryPercentage);
+
+    char rtcdatetimeBuf[64];
+    sprintf(rtcdatetimeBuf, "%04d-%02d-%02dT%02d:%02d:%02d",
+            rtcDate.year, rtcDate.mon, rtcDate.day, rtcTime.hour, rtcTime.min, rtcTime.sec);
+
+    String url(MY_URL_TEMPLATE);
+    url.replace("{mac}", WiFi.macAddress());
+    url.replace("{voltage}", strVoltage);
+    url.replace("{batterypercent}", strBatteryPercent);
+    url.replace("{rtcdatetime}", rtcdatetimeBuf);
+    url.replace("{width}", String(MY_SCREEN_WIDTH));
+    url.replace("{height}", String(MY_SCREEN_HEIGHT));
+    return url;
+}
+
 void setup() {
     M5.begin(false, false, false, true, true);
     M5.EPD.SetRotation(90);
@@ -100,33 +131,18 @@ void setup() {
     M5.RTC.setAlarmIRQ(RTC_Date(-1, -1, -1, -1), RTC_Time(-1, -1, -1)); // see https://github.com/m5stack/M5EPD/issues/26 why we need to use this version
 
     WiFi.begin(MY_WIFI_SSID, MY_WIFI_PASSWORD);
-
     int retry = 10; // try up to 5 seconds
     while (WiFi.status() != WL_CONNECTED && retry-- > 0) {
         delay(500);
         Serial.print(".");
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
-        setupTime();
-    }
+    setupTime(); // sync NTP time if required and connected
 
-    timeCanvas.createCanvas(270, 35);
-    timeCanvas.setTextFont(1);
-    timeCanvas.setTextSize(3);
-
-    batteryCanvas.createCanvas(220, 35);
-    batteryCanvas.setTextFont(1);
-    batteryCanvas.setTextSize(3);
-
-    if (WiFi.status() == WL_CONNECTED) {
-        String url(MY_URL_TEMPLATE);
-        url.replace("{mac}", WiFi.macAddress());
-
+    if (WiFi.status() == WL_CONNECTED) {    
+        String url = buildUrl();
         ESP_LOGV("setup", "Fetching image from %s", url.c_str());
         imageCanvas.createCanvas(MY_SCREEN_WIDTH, MY_SCREEN_HEIGHT);
-        //imageCanvas.drawJpgUrl("https://m5stack.oss-cn-shenzhen.aliyuncs.com/image/example_pic/flower.jpg");
-        //imageCanvas.drawPngUrl("http://192.168.1.10:8080/screenshot.png");
         imageCanvas.drawJpgUrl(url);
         M5.EPD.Clear(true);
         imageCanvas.pushCanvas(0, 0, UPDATE_MODE_GC16);
@@ -135,6 +151,14 @@ void setup() {
     }
 
     WiFi.disconnect(true, true);
+
+    timeCanvas.createCanvas(260, 35);
+    timeCanvas.setTextFont(1);
+    timeCanvas.setTextSize(3);
+
+    batteryCanvas.createCanvas(230, 35);
+    batteryCanvas.setTextFont(1);
+    batteryCanvas.setTextSize(3);
 }
 
 int waitTimeToNextWakeupInSeconds() {
