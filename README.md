@@ -27,6 +27,7 @@ Configuration is done inside `my_settings.h` prior to compiling and uploading th
    * `{batterypercent}`: will be replaced by an estimate of the current battery percentage, which is calculated based on the example algorithm provided for M5Paper, e.g. `40`
    * `{width}`: the device display width in pixels, e.g. `540` (in portrait mode), or `960` (in landscape mode)
    * `{height}`: the device display height in pixels, e.g. `960` (in portrait mode), or `540` (in landscape mode)
+   * `{wokenByRTC}`: `true` if device booted due to RTC interrupt (timer), else `false` (power-button , USB/power connected, etc.)
 
 The example value would result in a request to `http://example.com/devices/30:C6:F7:21:19:AC/screen.jpg?rtcdatetime=2023-04-08T18:15:04&voltage=3722&batteryPercent=40&width=540&height=960`
 

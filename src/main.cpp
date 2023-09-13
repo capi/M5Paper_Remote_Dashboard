@@ -15,6 +15,7 @@ M5EPD_Canvas imageCanvas(&M5.EPD);
 
 char timeStrbuff[64];
 char batteryStrbuff[64];
+bool wokenByRTC;
 
 void readRtc(rtc_date_t& rtcDate, rtc_time_t& rtcTime) {
     M5.RTC.getDate(&rtcDate);
@@ -118,10 +119,18 @@ String buildUrl() {
     url.replace("{rtcdatetime}", rtcdatetimeBuf);
     url.replace("{width}", String(MY_SCREEN_WIDTH));
     url.replace("{height}", String(MY_SCREEN_HEIGHT));
+    url.replace("{wokenByRTC}", wokenByRTC ? "true" : "false");
     return url;
 }
 
 void setup() {
+    // check if wakeup due to RTC -> https://community.m5stack.com/post/21806
+    // check power on reason before calling M5.begin()
+    // which calls RTC.begin() which clears the timer flag.
+    Wire.begin(21, 22);
+    uint8_t reason = M5.RTC.readReg(0x01);
+    wokenByRTC = (reason & 0b0000101) == 0b0000101;
+
     M5.begin(false, false, false, true, true);
     M5.EPD.SetRotation(90);
     M5.EPD.Clear(false); // false, since background image is written with highest quality first
