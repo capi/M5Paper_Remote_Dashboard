@@ -129,7 +129,9 @@ void setup() {
     // which calls RTC.begin() which clears the timer flag.
     Wire.begin(21, 22);
     uint8_t reason = M5.RTC.readReg(0x01);
-    wokenByRTC = (reason & 0b0000101) == 0b0000101;
+    // based on https://datasheet.lcsc.com/lcsc/1811151441_GATEMODE-BM8563_C269877.pdf
+    // bit 2 == timer flag, bit 3 == alarm flag, bit 1 == alarm interrupt enabled, bit 0 == timer interrupt enabled
+    wokenByRTC = (reason & 0b0001100) != 0;
 
     M5.begin(false, false, false, true, true);
     M5.EPD.SetRotation(90);
